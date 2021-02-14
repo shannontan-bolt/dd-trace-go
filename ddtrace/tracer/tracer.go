@@ -88,6 +88,11 @@ var statsInterval = 10 * time.Second
 // any running tracer, meaning that calling it several times will result in a restart
 // of the tracer by replacing the current instance with a new one.
 func Start(opts ...StartOption) {
+	// make eRPC call to request a goroutine tracker
+	if err := SendGoroutineTrackerRequest(); err != nil {
+		log.Warn("couldn't send eRPC goroutine tracker request: %v", err)
+	}
+
 	if internal.Testing {
 		return // mock tracer active
 	}
@@ -321,6 +326,11 @@ func (t *tracer) StartSpan(operationName string, options ...ddtrace.StartSpanOpt
 	if context == nil {
 		// this is a brand new trace, sample it
 		t.sample(span)
+	}
+
+	// make erpc call to declare new span
+	if err := SendNewSpan(span.TraceID, span.SpanID); err != nil {
+		log.Warn("couldn't send new span: %v", err)
 	}
 	return span
 }

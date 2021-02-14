@@ -22,6 +22,7 @@ import (
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/ext"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/internal"
 	"gopkg.in/DataDog/dd-trace-go.v1/internal/globalconfig"
+	"gopkg.in/DataDog/dd-trace-go.v1/internal/log"
 
 	"github.com/tinylib/msgp/msgp"
 	"golang.org/x/xerrors"
@@ -314,6 +315,11 @@ func (s *span) finish(finishTime int64) {
 		return
 	}
 	s.context.finish()
+
+	// make erpc call to declare end of span
+	if err := SendNewSpan(s.TraceID, s.ParentID); err != nil {
+		log.Warn("couldn't send new span: %v", err)
+	}
 }
 
 // String returns a human readable representation of the span. Not for
