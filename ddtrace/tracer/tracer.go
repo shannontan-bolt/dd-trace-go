@@ -60,6 +60,9 @@ type tracer struct {
 	// rules for applying a sampling rate to spans that match the designated service
 	// or operation name.
 	rulesSampling *rulesSampler
+
+	// appTags holds tags which are associated with the application
+	appTags map[string]interface{}
 }
 
 const (
@@ -156,6 +159,7 @@ func newUnstartedTracer(opts ...StartOption) *tracer {
 		rulesSampling:    newRulesSampler(c.samplingRules),
 		prioritySampling: sampler,
 		pid:              strconv.Itoa(os.Getpid()),
+		appTags:          map[string]interface{}{},
 	}
 }
 
@@ -163,6 +167,7 @@ func newTracer(opts ...StartOption) *tracer {
 	t := newUnstartedTracer(opts...)
 	c := t.config
 	t.config.statsd.Incr("datadog.tracer.started", nil, 1)
+	t.setAppTags()
 	if c.runtimeMetrics {
 		log.Debug("Runtime metrics enabled.")
 		t.wg.Add(1)
@@ -188,6 +193,22 @@ func newTracer(opts ...StartOption) *tracer {
 		t.reportHealthMetrics(statsInterval)
 	}()
 	return t
+}
+
+func (t *tracer) setAppTag(key string, value interface{}) {
+	t.appTags[key] = value
+}
+
+func (t *tracer) setAppTags() {
+	for k, v := range t.globalTags {
+		t.setAppTag(k, v)
+	}
+	if t.hostname != "" {
+		t.setAppTag(keyHostname, t.hostname)
+	}
+	if t.env != "" {
+		t.setAppTag(ext.Environment, t.env)
+	}
 }
 
 // worker receives finished traces to be added into the payload, as well
@@ -265,9 +286,6 @@ func (t *tracer) StartSpan(operationName string, options ...ddtrace.StartSpanOpt
 		taskEnd:      startExecutionTracerTask(operationName),
 		noDebugStack: t.config.noDebugStack,
 	}
-	if t.hostname != "" {
-		span.setMeta(keyHostname, t.hostname)
-	}
 	if context != nil {
 		// this is a child span
 		span.TraceID = context.traceID
@@ -302,10 +320,6 @@ func (t *tracer) StartSpan(operationName string, options ...ddtrace.StartSpanOpt
 	for k, v := range opts.Tags {
 		span.SetTag(k, v)
 	}
-	// add global tags
-	for k, v := range t.config.globalTags {
-		span.SetTag(k, v)
-	}
 	if context == nil || context.span == nil || context.span.Service != span.Service {
 		span.setMetric(keyTopLevel, 1)
 		// all top level spans are measured. So the measured tag is redundant.
@@ -313,9 +327,6 @@ func (t *tracer) StartSpan(operationName string, options ...ddtrace.StartSpanOpt
 	}
 	if t.config.version != "" && span.Service == t.config.serviceName {
 		span.SetTag(ext.Version, t.config.version)
-	}
-	if t.config.env != "" {
-		span.SetTag(ext.Environment, t.env)
 	}
 	if context == nil {
 		// this is a brand new trace, sample it

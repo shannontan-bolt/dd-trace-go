@@ -8,6 +8,7 @@ package tracer
 import (
 	"bytes"
 	"errors"
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/internal"
 	"io"
 	"math"
 	"os"
@@ -273,7 +274,27 @@ func (h *logTraceWriter) writeTrace(trace []*span) (n int, err *encodingError) {
 // add adds a trace to the writer's buffer.
 func (h *logTraceWriter) add(trace []*span) {
 	// Try adding traces to the buffer until we flush them all or encounter an error.
+	var appTags map[string]interface{}
+	if tr, ok := internal.GetGlobalTracer().(*tracer); ok {
+		appTags = tr.appTags
+	}
+	var tagsSet bool
+
 	for len(trace) > 0 {
+		if !tagsSet {
+			s := trace[0]
+			s.setMeta(keyMetadataSpan, "true")
+			for k, v := range appTags {
+				if _, ok := s.Meta[k]; ok {
+					continue
+				}
+				if _, ok := s.Metrics[k]; ok {
+					continue
+				}
+				s.SetTag(k, v)
+			}
+			tagsSet = true
+		}
 		n, err := h.writeTrace(trace)
 		if err != nil {
 			log.Error("Lost a trace: %s", err.cause)
@@ -285,6 +306,7 @@ func (h *logTraceWriter) add(trace []*span) {
 		// write the remaining spans.
 		if len(trace) > 0 {
 			h.flush()
+			tagsSet = false
 		}
 	}
 }
