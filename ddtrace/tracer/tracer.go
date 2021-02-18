@@ -61,7 +61,7 @@ type tracer struct {
 	// or operation name.
 	rulesSampling *rulesSampler
 
-	// appTags holds tags which are associated with the application
+	// appTags holds tags which are associated with the entire application
 	appTags map[string]interface{}
 }
 
@@ -159,7 +159,9 @@ func newUnstartedTracer(opts ...StartOption) *tracer {
 		rulesSampling:    newRulesSampler(c.samplingRules),
 		prioritySampling: sampler,
 		pid:              strconv.Itoa(os.Getpid()),
-		appTags:          map[string]interface{}{},
+		appTags: map[string]interface{}{
+			ext.Environment: c.env,
+		},
 	}
 }
 
@@ -167,15 +169,6 @@ func newTracer(opts ...StartOption) *tracer {
 	t := newUnstartedTracer(opts...)
 	c := t.config
 	t.config.statsd.Incr("datadog.tracer.started", nil, 1)
-	for k, v := range t.globalTags {
-		t.setAppTag(k, v)
-	}
-	if t.hostname != "" {
-		t.setAppTag(keyHostname, t.hostname)
-	}
-	if t.env != "" {
-		t.setAppTag(ext.Environment, t.env)
-	}
 	if c.runtimeMetrics {
 		log.Debug("Runtime metrics enabled.")
 		t.wg.Add(1)
@@ -201,10 +194,6 @@ func newTracer(opts ...StartOption) *tracer {
 		t.reportHealthMetrics(statsInterval)
 	}()
 	return t
-}
-
-func (t *tracer) setAppTag(key string, value interface{}) {
-	t.appTags[key] = value
 }
 
 // worker receives finished traces to be added into the payload, as well
@@ -309,21 +298,15 @@ func (t *tracer) StartSpan(operationName string, options ...ddtrace.StartSpanOpt
 	if context == nil || context.span == nil {
 		// this is either a root span or it has a remote parent, we should add the PID.
 		span.setMeta(ext.Pid, t.pid)
+		// set app tags on the root span
+		span.setMeta(keyMetadataSpan, "true")
+		for k, v := range t.appTags {
+			span.SetTag(k, v)
+		}
 		if _, ok := opts.Tags[ext.ServiceName]; !ok && t.config.runtimeMetrics {
 			// this is a root span in the global service; runtime metrics should
 			// be linked to it:
 			span.setMeta("language", "go")
-			// set app tags on the root span
-			span.setMeta(keyMetadataSpan, "true")
-			for k, v := range t.appTags {
-				if _, ok := span.Meta[k]; ok {
-					continue
-				}
-				if _, ok := span.Metrics[k]; ok {
-					continue
-				}
-				span.SetTag(k, v)
-			}
 		}
 	}
 	// add tags from options
