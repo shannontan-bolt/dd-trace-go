@@ -167,7 +167,15 @@ func newTracer(opts ...StartOption) *tracer {
 	t := newUnstartedTracer(opts...)
 	c := t.config
 	t.config.statsd.Incr("datadog.tracer.started", nil, 1)
-	t.setAppTags()
+	for k, v := range t.globalTags {
+		t.setAppTag(k, v)
+	}
+	if t.hostname != "" {
+		t.setAppTag(keyHostname, t.hostname)
+	}
+	if t.env != "" {
+		t.setAppTag(ext.Environment, t.env)
+	}
 	if c.runtimeMetrics {
 		log.Debug("Runtime metrics enabled.")
 		t.wg.Add(1)
@@ -197,18 +205,6 @@ func newTracer(opts ...StartOption) *tracer {
 
 func (t *tracer) setAppTag(key string, value interface{}) {
 	t.appTags[key] = value
-}
-
-func (t *tracer) setAppTags() {
-	for k, v := range t.globalTags {
-		t.setAppTag(k, v)
-	}
-	if t.hostname != "" {
-		t.setAppTag(keyHostname, t.hostname)
-	}
-	if t.env != "" {
-		t.setAppTag(ext.Environment, t.env)
-	}
 }
 
 // worker receives finished traces to be added into the payload, as well
@@ -286,6 +282,9 @@ func (t *tracer) StartSpan(operationName string, options ...ddtrace.StartSpanOpt
 		taskEnd:      startExecutionTracerTask(operationName),
 		noDebugStack: t.config.noDebugStack,
 	}
+	if t.hostname != "" {
+		span.setMeta(keyHostname, t.hostname)
+	}
 	if context != nil {
 		// this is a child span
 		span.TraceID = context.traceID
@@ -314,10 +313,25 @@ func (t *tracer) StartSpan(operationName string, options ...ddtrace.StartSpanOpt
 			// this is a root span in the global service; runtime metrics should
 			// be linked to it:
 			span.setMeta("language", "go")
+			// set app tags on the root span
+			span.setMeta(keyMetadataSpan, "true")
+			for k, v := range t.appTags {
+				if _, ok := span.Meta[k]; ok {
+					continue
+				}
+				if _, ok := span.Metrics[k]; ok {
+					continue
+				}
+				span.SetTag(k, v)
+			}
 		}
 	}
 	// add tags from options
 	for k, v := range opts.Tags {
+		span.SetTag(k, v)
+	}
+	// add global tags
+	for k, v := range t.config.globalTags {
 		span.SetTag(k, v)
 	}
 	if context == nil || context.span == nil || context.span.Service != span.Service {

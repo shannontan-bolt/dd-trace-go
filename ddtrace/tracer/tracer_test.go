@@ -6,9 +6,7 @@
 package tracer
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"io/ioutil"
@@ -1359,134 +1357,42 @@ func TestTakeStackTrace(t *testing.T) {
 }
 
 func TestAppTagsSetting(t *testing.T) {
-	t.Run("small-chunk", func(t *testing.T) {
+	t.Run("", func(t *testing.T) {
 		assert := assert.New(t)
-		tr, _, _, stop := startTestTracer(t)
-		defer stop()
+		tracer := newTracer(WithService(""), WithRuntimeMetrics())
+		tracer.setAppTag("tag", "value")
+		tracer.setAppTag("v", 1)
+		internal.SetGlobalTracer(tracer)
 
-		tr.setAppTag("git.branch", "branch")
+		parent := StartSpan("app-tag").(*span)
+		child := StartSpan("app-tag", Measured(), ChildOf(parent.context)).(*span)
 
-		var buf bytes.Buffer
-		w := newLogTraceWriter(newConfig())
-		w.w = &buf
-		tr.traceWriter = w
+		assert.Equal("value", parent.Meta["tag"])
+		assert.Equal(float64(1), parent.Metrics["v"])
 
-		tr.traceWriter.add([]*span{makeSpan(5), makeSpan(5)})
-		tr.traceWriter.flush()
-
-		v := struct{ Traces [][]map[string]interface{} }{}
-		d := json.NewDecoder(&buf)
-		err := d.Decode(&v)
-		assert.NoError(err)
-
-		s1 := v.Traces[0][0]
-		assert.Contains(s1["meta"], "git.branch")
-		assert.Equal("branch", s1["meta"].(map[string]interface{})["git.branch"])
-		assert.Contains(s1["meta"], keyMetadataSpan)
-		assert.Equal("true", s1["meta"].(map[string]interface{})[keyMetadataSpan])
-
-		s2 := v.Traces[0][1]
-		assert.NotContains(s2["meta"], "git.branch")
-		assert.NotContains(s2["meta"], keyMetadataSpan)
-
+		assert.NotContains(child.Meta, "tag")
+		assert.NotContains(child.Metrics, "v")
 	})
 
-	t.Run("two-large-chunk", func(t *testing.T) {
+	t.Run("", func(t *testing.T) {
 		assert := assert.New(t)
+		tracer := newTracer(WithService(""), WithRuntimeMetrics())
+		tracer.setAppTag("tag", "value")
+		tracer.setAppTag("v", 1)
+		internal.SetGlobalTracer(tracer)
 
-		tr, _, _, stop := startTestTracer(t)
-		defer stop()
-		var buf bytes.Buffer
-		w := newLogTraceWriter(newConfig())
-		w.w = &buf
-		tr.traceWriter = w
+		parent := StartSpan("app-tag").(*span)
+		parent.setMeta("tag", "no-override")
+		parent.setMetric("v", 2)
+		child := StartSpan("app-tag", Measured(), ChildOf(parent.context)).(*span)
 
-		tr.setAppTag("tag", "value")
-		tr.setAppTag("git.branch", "branch")
+		assert.Equal("no-override", parent.Meta["tag"])
+		assert.Equal(float64(2), parent.Metrics["v"])
 
-		tr.traceWriter.add([]*span{makeSpan(4000), makeSpan(4000)})
-		tr.traceWriter.flush()
-
-		v := struct{ Traces [][]map[string]interface{} }{}
-		d := json.NewDecoder(&buf)
-		err := d.Decode(&v)
-		assert.NoError(err)
-
-		span1 := v.Traces[0][0]
-		assert.Equal("value", span1["meta"].(map[string]interface{})["tag"])
-		assert.Equal("branch", span1["meta"].(map[string]interface{})["git.branch"])
-
-		err = d.Decode(&v)
-		assert.NoError(err)
-		span2 := v.Traces[0][0]
-		assert.Equal("value", span2["meta"].(map[string]interface{})["tag"])
-		assert.Equal("branch", span2["meta"].(map[string]interface{})["git.branch"])
-
+		assert.NotContains(child.Meta, "tag")
+		assert.NotContains(child.Metrics, "v")
 	})
 
-	t.Run("two-small-chunks", func(t *testing.T) {
-		assert := assert.New(t)
-
-		tr, _, _, stop := startTestTracer(t)
-		defer stop()
-		var buf bytes.Buffer
-		w := newLogTraceWriter(newConfig())
-		w.w = &buf
-		tr.traceWriter = w
-
-		tr.setAppTag("tag", "value")
-		tr.setAppTag("git.branch", "branch")
-
-		tr.traceWriter.add([]*span{makeSpan(5)})
-		tr.traceWriter.add([]*span{makeSpan(5)})
-		tr.traceWriter.flush()
-
-		v := struct{ Traces [][]map[string]interface{} }{}
-		d := json.NewDecoder(&buf)
-		err := d.Decode(&v)
-		assert.NoError(err)
-
-		span1 := v.Traces[0][0]
-		assert.Equal("value", span1["meta"].(map[string]interface{})["tag"])
-		assert.Equal("branch", span1["meta"].(map[string]interface{})["git.branch"])
-
-		span2 := v.Traces[1][0]
-		assert.Equal("value", span2["meta"].(map[string]interface{})["tag"])
-		assert.Equal("branch", span2["meta"].(map[string]interface{})["git.branch"])
-
-	})
-
-	t.Run("override", func(t *testing.T) {
-		assert := assert.New(t)
-		tr, _, _, stop := startTestTracer(t)
-		defer stop()
-
-		tr.setAppTag("git.branch", "branch")
-		tr.setAppTag("version", 1)
-		tr.setAppTag("app-tag", "app-value")
-
-		var buf bytes.Buffer
-		w := newLogTraceWriter(newConfig())
-		w.w = &buf
-		tr.traceWriter = w
-
-		s1 := makeSpan(2000)
-		s1.Meta["git.branch"] = "override"
-		s1.Metrics["version"] = float64(2)
-		tr.traceWriter.add([]*span{s1, makeSpan(2000)})
-		tr.traceWriter.flush()
-
-		v := struct{ Traces [][]map[string]interface{} }{}
-		d := json.NewDecoder(&buf)
-		err := d.Decode(&v)
-		assert.NoError(err)
-
-		span1 := v.Traces[0][0]
-		assert.Equal("override", span1["meta"].(map[string]interface{})["git.branch"])
-		assert.Equal(float64(2), span1["metrics"].(map[string]interface{})["version"])
-		assert.Equal("app-value", span1["meta"].(map[string]interface{})["app-tag"])
-
-	})
 }
 
 // BenchmarkTracerStackFrames tests the performance of taking stack trace.
