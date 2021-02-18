@@ -1360,8 +1360,8 @@ func TestAppTagsSetting(t *testing.T) {
 	t.Run("", func(t *testing.T) {
 		assert := assert.New(t)
 		tracer := newTracer(WithService(""), WithRuntimeMetrics())
-		tracer.setAppTag("tag", "value")
-		tracer.setAppTag("v", 1)
+		tracer.appTags["tag"] = "value"
+		tracer.appTags["v"] = 1
 		internal.SetGlobalTracer(tracer)
 
 		parent := StartSpan("app-tag").(*span)
@@ -1377,8 +1377,8 @@ func TestAppTagsSetting(t *testing.T) {
 	t.Run("", func(t *testing.T) {
 		assert := assert.New(t)
 		tracer := newTracer(WithService(""), WithRuntimeMetrics())
-		tracer.setAppTag("tag", "value")
-		tracer.setAppTag("v", 1)
+		tracer.appTags["tag"] = "value"
+		tracer.appTags["v"] = 1
 		internal.SetGlobalTracer(tracer)
 
 		parent := StartSpan("app-tag").(*span)
