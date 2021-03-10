@@ -50,7 +50,7 @@ func (t *opentracer) StartSpan(operationName string, options ...opentracing.Star
 	}
 	opts := []ddtrace.StartSpanOption{tracer.StartTime(sso.StartTime)}
 	for _, ref := range sso.References {
-		if v, ok := ref.ReferencedContext.(ddtrace.SpanContext); ok && ref.Type == opentracing.ChildOfRef {
+		if v, ok := ref.ReferencedContext.(ddtrace.SpanContext); ok {
 			opts = append(opts, tracer.ChildOf(v))
 			break // can only have one parent
 		}
